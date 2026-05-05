@@ -79,7 +79,7 @@ def extract_body(msg_path: str) -> str:
 
 # ── Streamlit UI ─────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="メール整形ツール", page_icon="✉️", layout="centered")
+st.set_page_config(page_title="メール整形ツール", page_icon="✉️", layout="wide")
 st.title("✉️ メール整形ツール")
 st.caption("返信ヘッダーと署名を除去してクリーンな本文を取り出します")
 
@@ -128,13 +128,13 @@ with tab1:
 with tab2:
     st.markdown("任意のメール本文を貼り付けると、返信ヘッダーと署名を除去して返します。")
 
-    col1, col_mid, col2 = st.columns([10, 2, 10])
+    col1, col_mid, col2 = st.columns([20, 1, 20])
 
     with col1:
         st.subheader("入力")
         raw = st.text_area(
             "ここに貼り付け",
-            height=380,
+            height=520,
             placeholder="メール本文をここに貼り付けてください…",
             label_visibility="collapsed",
         )
@@ -153,6 +153,6 @@ with tab2:
         st.text_area(
             "整形結果",
             value=result_text,
-            height=380,
+            height=520,
             label_visibility="collapsed",
         )
