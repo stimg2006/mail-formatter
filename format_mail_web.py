@@ -37,6 +37,7 @@ def _is_short_block(text: str) -> bool:
 def strip_reply_headers(text: str) -> str:
     text = _SEPARATOR_RE.sub('', text)
     text = _REPLY_HEADER_RE.sub('', text)
+    text = re.sub(r'^[ \t]*Internal[ \t]*$', '=' * 52, text, flags=re.MULTILINE | re.IGNORECASE)
     text = re.sub(r'^[ \t]+$', '', text, flags=re.MULTILINE)  # 空白のみの行を空行に
     text = re.sub(r'\n{3,}', '\n\n', text)                    # 連続する空行を1行に
     return text.strip()
