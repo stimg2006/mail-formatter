@@ -128,7 +128,7 @@ with tab1:
 with tab2:
     st.markdown("任意のメール本文を貼り付けると、返信ヘッダーと署名を除去して返します。")
 
-    col1, col2 = st.columns(2)
+    col1, col_mid, col2 = st.columns([10, 2, 10])
 
     with col1:
         st.subheader("入力")
@@ -139,12 +139,16 @@ with tab2:
             label_visibility="collapsed",
         )
 
+    with col_mid:
+        # テキストエリアのラベル分（subheader + margin）を合わせて縦中央に寄せる
+        st.markdown("<div style='margin-top:3.6rem'></div>", unsafe_allow_html=True)
+        if st.button("→", key="btn_paste", type="primary", use_container_width=True):
+            if raw.strip():
+                result = strip_signatures(strip_reply_headers(raw))
+                st.session_state["paste_result"] = result
+
     with col2:
         st.subheader("整形後")
-        if st.button("整形", key="btn_paste", type="primary") and raw.strip():
-            result = strip_signatures(strip_reply_headers(raw))
-            st.session_state["paste_result"] = result
-
         result_text = st.session_state.get("paste_result", "")
         st.text_area(
             "整形結果",
