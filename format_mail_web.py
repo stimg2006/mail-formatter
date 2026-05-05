@@ -37,7 +37,8 @@ def _is_short_block(text: str) -> bool:
 def strip_reply_headers(text: str) -> str:
     text = _SEPARATOR_RE.sub('', text)
     text = _REPLY_HEADER_RE.sub('', text)
-    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r'^[ \t]+$', '', text, flags=re.MULTILINE)  # 空白のみの行を空行に
+    text = re.sub(r'\n{3,}', '\n\n', text)                    # 連続する空行を1行に
     return text.strip()
 
 
@@ -65,8 +66,8 @@ def strip_signatures(text: str) -> str:
                 to_remove.add(j)
                 j -= 1
 
-    result = [p for idx, p in enumerate(paragraphs) if idx not in to_remove]
-    return re.sub(r'\n{3,}', '\n\n', '\n\n'.join(result)).strip()
+    result = [p for idx, p in enumerate(paragraphs) if idx not in to_remove and p.strip()]
+    return '\n\n'.join(result).strip()
 
 
 def extract_body(msg_path: str) -> str:
