@@ -16,8 +16,10 @@ _REPLY_HEADER_RE = re.compile(
     re.MULTILINE | re.IGNORECASE,
 )
 _SIG_INDICATOR_RE = re.compile(
-    r'\S+@\S+<mailto:'
-    r'|^[ \t]*(Mobile|Phone|Tel|Fax|電話|携帯)[\s:+]',
+    r'\S+@\S+<mailto:'                          # HTML形式 email<mailto:...>
+    r'|\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b'         # 素のメールアドレス
+    r'|^[ \t]*(Mobile|Phone|Tel|Fax|電話|携帯)[\s:+]'  # ラベル付き電話番号
+    r'|^\s*\+?[\d][\d\s\-\(\)\.]{6,}\s*$',     # ラベルなし電話番号（+1-734-855-3244 等）
     re.IGNORECASE | re.MULTILINE,
 )
 _CLOSING_RE = re.compile(
@@ -40,17 +42,29 @@ def strip_reply_headers(text: str) -> str:
 
 
 def strip_signatures(text: str) -> str:
+    # 空白文字だけの行（"\n \n" など）を空行に正規化してから分割
+    text = re.sub(r'\n[ \t]+\n', '\n\n', text)
     paragraphs = re.split(r'\n\n+', text.strip())
     to_remove: set[int] = set()
+
     for i, para in enumerate(paragraphs):
         if _SIG_INDICATOR_RE.search(para):
             to_remove.add(i)
             j = i - 1
-            while j >= 0 and _is_short_block(paragraphs[j]):
-                if _CLOSING_RE.search(paragraphs[j]):
+            while j >= 0:
+                block = paragraphs[j]
+                if not block.strip():           # 空・空白のみの段落はスキップして続行
+                    to_remove.add(j)
+                    j -= 1
+                    continue
+                if not _is_short_block(block):
+                    break
+                if _CLOSING_RE.search(block):   # 結び言葉も署名の一部として除去し停止
+                    to_remove.add(j)
                     break
                 to_remove.add(j)
                 j -= 1
+
     result = [p for idx, p in enumerate(paragraphs) if idx not in to_remove]
     return re.sub(r'\n{3,}', '\n\n', '\n\n'.join(result)).strip()
 
