@@ -6,6 +6,7 @@ import zipfile
 
 import extract_msg
 import streamlit as st
+import streamlit.components.v1 as components
 from bs4 import BeautifulSoup
 
 # ── テキスト処理ロジック ─────────────────────────────────────────────────────
@@ -172,3 +173,69 @@ with tab2:
             height=520,
             label_visibility="collapsed",
         )
+
+    # ── 入力と整形後のテキストエリアのスクロールを同期 ────────────────────────
+    # ホイール／スクロールバー／キーボード操作すべてで左右が同時にスクロールするよう、
+    # 親ドキュメントの textarea を aria-label で特定して相互に scrollTop を共有する。
+    components.html(
+        """
+        <script>
+        (function () {
+            const parentDoc = window.parent.document;
+            const LEFT_LABEL = "ここに貼り付け";
+            const RIGHT_LABEL = "整形結果";
+
+            function attach() {
+                const left = parentDoc.querySelector(
+                    'textarea[aria-label="' + LEFT_LABEL + '"]'
+                );
+                const right = parentDoc.querySelector(
+                    'textarea[aria-label="' + RIGHT_LABEL + '"]'
+                );
+                if (!left || !right) return false;
+                if (left.dataset.scrollSync === "1" &&
+                    right.dataset.scrollSync === "1") {
+                    return true;
+                }
+                left.dataset.scrollSync = "1";
+                right.dataset.scrollSync = "1";
+
+                let syncing = false;
+                function makeHandler(src, dst) {
+                    return function () {
+                        if (syncing) return;
+                        syncing = true;
+                        const maxSrc = src.scrollHeight - src.clientHeight;
+                        const maxDst = dst.scrollHeight - dst.clientHeight;
+                        if (maxSrc > 0 && maxDst > 0) {
+                            // 行数が違っても割合で揃える
+                            dst.scrollTop = (src.scrollTop / maxSrc) * maxDst;
+                        } else {
+                            dst.scrollTop = src.scrollTop;
+                        }
+                        window.requestAnimationFrame(function () {
+                            syncing = false;
+                        });
+                    };
+                }
+                left.addEventListener("scroll", makeHandler(left, right));
+                right.addEventListener("scroll", makeHandler(right, left));
+                return true;
+            }
+
+            // 初回アタッチ（Streamlit の再描画でまだ要素が無いことがある）
+            if (!attach()) {
+                const interval = setInterval(function () {
+                    if (attach()) clearInterval(interval);
+                }, 150);
+                setTimeout(function () { clearInterval(interval); }, 10000);
+            }
+
+            // 再描画で textarea が差し替わった場合に再アタッチする
+            const observer = new MutationObserver(function () { attach(); });
+            observer.observe(parentDoc.body, { childList: true, subtree: true });
+        })();
+        </script>
+        """,
+        height=0,
+    )
