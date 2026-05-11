@@ -149,53 +149,132 @@ with tab2:
 
     with col1:
         st.subheader("入力")
-        raw = st.text_area(
+        st.text_area(
             "ここに貼り付け",
             height=520,
             placeholder="メール本文をここに貼り付けてください…",
             label_visibility="collapsed",
+            key="raw_input",
         )
 
     with col_mid:
         # テキストエリアのラベル分（subheader + margin）を合わせて縦中央に寄せる
         st.markdown("<div style='margin-top:3.6rem'></div>", unsafe_allow_html=True)
         if st.button("→", key="btn_paste", type="primary", use_container_width=True):
-            if raw.strip():
-                result = strip_signatures(strip_reply_headers(raw))
-                st.session_state["paste_result"] = result
+            current_raw = st.session_state.get("raw_input", "")
+            if current_raw.strip():
+                # 整形後 textarea の key と同じ名前で書き込めば、次の描画でそのまま反映される
+                st.session_state["paste_result"] = strip_signatures(
+                    strip_reply_headers(current_raw)
+                )
 
     with col2:
         st.subheader("整形後")
-        result_text = st.session_state.get("paste_result", "")
         st.text_area(
             "整形結果",
-            value=result_text,
             height=520,
             label_visibility="collapsed",
+            key="paste_result",
         )
 
-    # ── 入力と整形後のテキストエリアのスクロールを同期 ────────────────────────
-    # ホイール／スクロールバー／キーボード操作すべてで左右が同時にスクロールするよう、
-    # 親ドキュメントの textarea を aria-label で特定して相互に scrollTop を共有する。
+    # ── 入力と整形後のテキストエリアに対する UI 拡張 ──────────────────────────
+    # 1) スクロール同期: ホイール／スクロールバー／キーボード操作すべてで
+    #    左右が同時にスクロールするよう、親ドキュメントの textarea を aria-label で
+    #    特定して相互に scrollTop を共有する。
+    # 2) DeepL 風のクリア (×) ボタン: 値があるときだけ右上に表示し、
+    #    クリック時に React (Streamlit) が検知できる方法で textarea を空にする。
     components.html(
         """
         <script>
         (function () {
-            const parentDoc = window.parent.document;
+            const parentWin = window.parent;
+            const parentDoc = parentWin.document;
             const LEFT_LABEL = "ここに貼り付け";
             const RIGHT_LABEL = "整形結果";
 
-            function attach() {
-                const left = parentDoc.querySelector(
-                    'textarea[aria-label="' + LEFT_LABEL + '"]'
-                );
-                const right = parentDoc.querySelector(
-                    'textarea[aria-label="' + RIGHT_LABEL + '"]'
-                );
-                if (!left || !right) return false;
-                if (left.dataset.scrollSync === "1" &&
-                    right.dataset.scrollSync === "1") {
-                    return true;
+            // React の制御コンポーネントに値変更を伝えるため、ネイティブ value setter 経由で
+            // 書き換えてから input イベントを発火する（単に value="" としても無視される）。
+            const nativeValueSetter = Object.getOwnPropertyDescriptor(
+                parentWin.HTMLTextAreaElement.prototype, "value"
+            ).set;
+            function clearTextarea(ta) {
+                nativeValueSetter.call(ta, "");
+                ta.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+
+            function ensureClearButton(ta) {
+                // textarea のすぐ外側のラッパー (data-baseweb="textarea") を基準に絶対配置
+                const wrapper =
+                    ta.closest('[data-baseweb="textarea"]') || ta.parentElement;
+                if (!wrapper) return;
+                if (wrapper.dataset.clearBtnInstalled === "1") {
+                    // 既に設置済みでも表示状態だけは現在値に合わせる
+                    const existing = wrapper.querySelector(".__clear_btn__");
+                    if (existing) existing.style.display = ta.value.length ? "flex" : "none";
+                    return;
+                }
+                wrapper.dataset.clearBtnInstalled = "1";
+                if (getComputedStyle(wrapper).position === "static") {
+                    wrapper.style.position = "relative";
+                }
+
+                const btn = parentDoc.createElement("button");
+                btn.type = "button";
+                btn.textContent = "×";
+                btn.className = "__clear_btn__";
+                btn.setAttribute("aria-label", "クリア");
+                btn.setAttribute("title", "クリア");
+                btn.style.cssText = [
+                    "position:absolute",
+                    "top:6px",
+                    "right:8px",
+                    "z-index:50",
+                    "width:22px",
+                    "height:22px",
+                    "padding:0",
+                    "border:none",
+                    "border-radius:50%",
+                    "background:rgba(0,0,0,0.10)",
+                    "color:#333",
+                    "font-size:15px",
+                    "line-height:1",
+                    "cursor:pointer",
+                    "display:none",
+                    "align-items:center",
+                    "justify-content:center",
+                    "font-family:Arial, sans-serif",
+                ].join(";");
+                btn.addEventListener("mouseenter", function () {
+                    btn.style.background = "rgba(0,0,0,0.20)";
+                });
+                btn.addEventListener("mouseleave", function () {
+                    btn.style.background = "rgba(0,0,0,0.10)";
+                });
+                btn.addEventListener("mousedown", function (e) {
+                    // textarea からフォーカスを奪わない
+                    e.preventDefault();
+                });
+                btn.addEventListener("click", function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    clearTextarea(ta);
+                    btn.style.display = "none";
+                });
+                wrapper.appendChild(btn);
+
+                function update() {
+                    btn.style.display = ta.value.length > 0 ? "flex" : "none";
+                }
+                ta.addEventListener("input", update);
+                // 値が外部から差し替わるケース（整形ボタン押下後の再描画など）にも追従
+                const valueObserver = new MutationObserver(update);
+                valueObserver.observe(ta, { attributes: true, attributeFilter: ["value"] });
+                update();
+            }
+
+            function setupScrollSync(left, right) {
+                if (left.dataset.scrollSync === "1" && right.dataset.scrollSync === "1") {
+                    return;
                 }
                 left.dataset.scrollSync = "1";
                 right.dataset.scrollSync = "1";
@@ -213,13 +292,27 @@ with tab2:
                         } else {
                             dst.scrollTop = src.scrollTop;
                         }
-                        window.requestAnimationFrame(function () {
+                        parentWin.requestAnimationFrame(function () {
                             syncing = false;
                         });
                     };
                 }
                 left.addEventListener("scroll", makeHandler(left, right));
                 right.addEventListener("scroll", makeHandler(right, left));
+            }
+
+            function attach() {
+                const left = parentDoc.querySelector(
+                    'textarea[aria-label="' + LEFT_LABEL + '"]'
+                );
+                const right = parentDoc.querySelector(
+                    'textarea[aria-label="' + RIGHT_LABEL + '"]'
+                );
+                if (!left || !right) return false;
+
+                ensureClearButton(left);
+                ensureClearButton(right);
+                setupScrollSync(left, right);
                 return true;
             }
 
