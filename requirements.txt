@@ -1,3 +1,5 @@
 streamlit
 extract-msg
 beautifulsoup4
+pytesseract
+Pillow
