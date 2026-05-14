@@ -40,7 +40,8 @@ SEPARATOR_LINE = '=' * 52
 
 # 削除するヘッダー行: From / Sent / Date / 差出人 / 送信日時 / 送信日 は残す
 _REMOVE_HEADER_RE = re.compile(
-    r'^[ \t]*(To|Cc|Bcc|Subject|宛先|件名|CC|BCC)\s*:.*$\r?\n?',
+    r'^[ \t]*(To|Cc|Bcc|Subject|Importance|Priority|Sensitivity|'
+    r'宛先|件名|CC|BCC|重要度|優先度)\s*:.*$\r?\n?',
     re.MULTILINE | re.IGNORECASE,
 )
 
@@ -53,8 +54,8 @@ _FROM_LINE_RE = re.compile(
 # HTML メール由来でラベル行と値行が改行で分離されているケースを 1 行に折り畳む。
 # 例)  "From:\nSyed Yusuff Basha ..."  →  "From: Syed Yusuff Basha ..."
 _FOLD_HEADER_RE = re.compile(
-    r'^([ \t]*(?:From|Sent|Date|To|Cc|Bcc|Subject|'
-    r'差出人|送信日時|送信日|宛先|件名|CC|BCC)[ \t]*:)[ \t]*\n+(?=[ \t]*\S)',
+    r'^([ \t]*(?:From|Sent|Date|To|Cc|Bcc|Subject|Importance|Priority|Sensitivity|'
+    r'差出人|送信日時|送信日|宛先|件名|CC|BCC|重要度|優先度)[ \t]*:)[ \t]*\n+(?=[ \t]*\S)',
     re.MULTILINE | re.IGNORECASE,
 )
 _SIG_INDICATOR_RE = re.compile(
@@ -68,6 +69,23 @@ _CLOSING_RE = re.compile(
     r'\b(regards|sincerely|thanks|thank\s+you|best|cheers|'
     r'よろしく|以上|敬具|失礼します)\b',
     re.IGNORECASE,
+)
+
+# 結び言葉から始まる行（独立した署名ブロックの判定に使う）
+# "Thanks for the update." のような本文と区別するため、汎用的な単語 (thanks / thank you / best)
+# の直後に句読点または行末があることを必須にする。
+_SIG_OPENER_RE = re.compile(
+    r'^\s*(?:'
+    r'kind\s+regards|best\s+regards|warm\s+regards|with\s+regards|'
+    r'best\s+wishes|thanks\s+and\s+regards|thanks\s+&\s+regards|'
+    r'regards|sincerely|cheers|'
+    r'thanks(?:\s+(?:in\s+advance|a\s+lot|so\s+much|again))?(?=[,，、。.!]|\s*$)|'
+    r'thank\s+you(?:\s+very\s+much)?(?=[,，、。.!]|\s*$)|'
+    r'best(?=[,，、。.!]|\s*$)|'
+    r'よろしく(?:お願い(?:いた)?します)?|以上(?:です)?|敬具|失礼(?:いた)?します'
+    r')'
+    r'[,，、。.\s!]',
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
@@ -103,9 +121,35 @@ def strip_reply_headers(text: str) -> str:
     return text.strip()
 
 
+def _looks_like_signature_block(para: str) -> bool:
+    """結び言葉から始まる短いブロックを独立した署名とみなす。"""
+    if not _SIG_OPENER_RE.match(para):
+        return False
+    lines = [l for l in para.splitlines() if l.strip()]
+    if not lines:
+        return False
+    # 結び言葉から始まり、最大 12 行 / 各行 ≤80 文字 のブロックを署名候補とする
+    return len(lines) <= 12 and all(len(l.strip()) <= 80 for l in lines)
+
+
+def _strip_inline_signature(para: str) -> str:
+    """段落の途中から結び言葉＋短い行が続く場合、そこから末尾までを署名として除去。"""
+    lines = para.splitlines()
+    for idx, line in enumerate(lines):
+        if idx == 0:
+            continue  # 段落冒頭は _looks_like_signature_block で処理済み
+        if _SIG_OPENER_RE.match(line):
+            tail = lines[idx:]
+            non_empty_tail = [l for l in tail if l.strip()]
+            if non_empty_tail and len(non_empty_tail) <= 12 and \
+                    all(len(l.strip()) <= 80 for l in non_empty_tail):
+                return "\n".join(lines[:idx]).rstrip()
+    return para
+
+
 def strip_signatures(text: str) -> str:
     # 空白文字だけの行（"\n \n" など）を空行に正規化してから分割
-    text = re.sub(r'\n[ \t]+\n', '\n\n', text)
+    text = re.sub(r'\n[ \t\u00A0]+\n', '\n\n', text)
     paragraphs = re.split(r'\n\n+', text.strip())
     to_remove: set[int] = set()
 
@@ -113,6 +157,27 @@ def strip_signatures(text: str) -> str:
         # From: / 差出人: 行を含む段落（メール境界のヘッダー）は署名扱いしない
         if _FROM_LINE_RE.search(para):
             continue
+
+        # 結び言葉から始まる独立した短いブロックは署名として削除
+        if _looks_like_signature_block(para):
+            to_remove.add(i)
+            # 後続の「短いブロック」も署名の続き（会社名/役職など）として除去
+            k = i + 1
+            while k < len(paragraphs):
+                nxt = paragraphs[k]
+                if not nxt.strip():
+                    to_remove.add(k)
+                    k += 1
+                    continue
+                if _FROM_LINE_RE.search(nxt):
+                    break
+                if _is_short_block(nxt):
+                    to_remove.add(k)
+                    k += 1
+                    continue
+                break
+            continue
+
         if _SIG_INDICATOR_RE.search(para):
             to_remove.add(i)
             j = i - 1
@@ -130,7 +195,14 @@ def strip_signatures(text: str) -> str:
                 to_remove.add(j)
                 j -= 1
 
-    result = [p for idx, p in enumerate(paragraphs) if idx not in to_remove and p.strip()]
+    result = []
+    for idx, p in enumerate(paragraphs):
+        if idx in to_remove:
+            continue
+        # 段落内に途中から結び言葉が出る場合も削除
+        p = _strip_inline_signature(p)
+        if p.strip():
+            result.append(p)
     return '\n\n'.join(result).strip()
 
 
@@ -150,6 +222,27 @@ def _attachment_cid(att) -> str:
     return ""
 
 
+def _clean_ocr_text(text: str) -> str:
+    """OCR 結果から記号のみのノイズ行、極端に短いノイズを除去し、空行を圧縮する。"""
+    cleaned: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            cleaned.append("")
+            continue
+        # 記号と空白だけの行は捨てる ( "*/", "/", "]", "[", "*", ",", "..." 等)
+        if re.fullmatch(r'[\W_]+', s):
+            continue
+        # 文字数3文字未満かつ英数字を含まない行は捨てる
+        if len(s) < 3 and not re.search(r'[A-Za-z0-9\u3040-\u30ff\u4e00-\u9fff]', s):
+            continue
+        cleaned.append(line)
+    out = "\n".join(cleaned)
+    # OCR ブロック内では空行は許可しない（最大 1 個の空行は最終整形で確保される）
+    out = re.sub(r'\n\s*\n+', '\n', out)
+    return out.strip()
+
+
 def _ocr_image_bytes(data: bytes) -> str:
     """画像バイト列から OCR でテキストを抽出。失敗時は空文字。"""
     if not _OCR_AVAILABLE or pytesseract is None:
@@ -158,7 +251,8 @@ def _ocr_image_bytes(data: bytes) -> str:
         img = Image.open(io.BytesIO(data))
         if img.mode not in ("L", "RGB"):
             img = img.convert("RGB")
-        return pytesseract.image_to_string(img, lang=_OCR_LANG).strip()
+        raw = pytesseract.image_to_string(img, lang=_OCR_LANG)
+        return _clean_ocr_text(raw)
     except Exception:
         return ""
 
@@ -201,15 +295,24 @@ def _build_image_blocks(msg) -> tuple[dict, list, set]:
     return cid_map, orphans, matched_cids
 
 
-def _html_to_text_with_ocr(html: str, cid_map: dict, matched_cids: set) -> str:
-    """HTML本文中の <img> を OCR テキストに置換してからプレーン化する。"""
+_BLOCK_TAGS_SINGLE_NL = ("p", "div", "br", "tr", "li", "blockquote", "pre")
+_BLOCK_TAGS_DOUBLE_NL = ("h1", "h2", "h3", "h4", "h5", "h6")
+
+
+def _normalize_html_to_text(html: str, cid_map: dict, matched_cids: set) -> str:
+    """HTML 本文を整形してプレーンテキスト化する。
+    - <a href="mailto:X"> を X テキストに置換（前後の &lt; &gt; と合わさり <X> になる）
+    - <img> 位置に OCR テキストを埋め込む
+    - 改行はブロック要素境界でのみ発生（インライン要素は連結）→ <a> 境界で行が割れない
+    """
     soup = BeautifulSoup(html, "html.parser")
+
+    # 画像位置に OCR テキストを埋め込む
     for img in soup.find_all("img"):
         src = (img.get("src") or "").strip()
         replacement = None
         if src.lower().startswith("cid:"):
             cid_raw = src[4:]
-            # "cid:image001.png@01D..." → "image001.png" 部分を切り出す
             cid_clean = cid_raw.split("@", 1)[0]
             for key in (cid_raw, cid_clean):
                 if key in cid_map:
@@ -218,7 +321,6 @@ def _html_to_text_with_ocr(html: str, cid_map: dict, matched_cids: set) -> str:
                     matched_cids.add(cid_clean)
                     break
         if replacement is None:
-            # ファイル名がそのまま src に入っている場合（data URI 等は除外）
             for key, val in cid_map.items():
                 if key and key in src and not src.startswith("data:"):
                     replacement = val
@@ -227,7 +329,31 @@ def _html_to_text_with_ocr(html: str, cid_map: dict, matched_cids: set) -> str:
         if replacement is None:
             replacement = "[画像]"
         img.replace_with("\n" + replacement + "\n")
-    return soup.get_text(separator="\n")
+
+    # mailto リンクをメアド文字列に置換（リンクテキスト境界で改行が入らないようにする）
+    for a in soup.find_all("a"):
+        href = (a.get("href") or "").strip()
+        if href.lower().startswith("mailto:"):
+            email = href[7:].split("?", 1)[0]
+            a.replace_with(email)
+        else:
+            a.replace_with(a.get_text())
+
+    # ブロック要素の末尾に明示的に改行を挿入してから separator='' で取得
+    for tag in soup.find_all(list(_BLOCK_TAGS_SINGLE_NL)):
+        tag.append("\n")
+    for tag in soup.find_all(list(_BLOCK_TAGS_DOUBLE_NL)):
+        tag.append("\n\n")
+
+    text = soup.get_text(separator="")
+
+    # &lt;<a>email</a>&gt; → <<email>> となるので <email> に正規化
+    text = re.sub(
+        r'<<\s*([\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+)\s*>>',
+        r'<\1>',
+        text,
+    )
+    return text
 
 
 def extract_body(msg_path: str, do_ocr: bool = True) -> str:
@@ -249,13 +375,11 @@ def extract_body(msg_path: str, do_ocr: bool = True) -> str:
                     except Exception:
                         html = html.decode("utf-8", errors="replace")
 
-                # 画像がある場合は HTML 本文を優先（img タグ位置に OCR テキストを埋め込めるため）
-                if has_images and html:
-                    text = _html_to_text_with_ocr(html, cid_map, matched_cids)
+                # HTML 本文があればそれを優先（mailto 等のリンク構造を活かして整形できる）
+                if html:
+                    text = _normalize_html_to_text(html, cid_map, matched_cids)
                 elif body and body.strip():
                     text = body
-                elif html:
-                    text = BeautifulSoup(html, "html.parser").get_text(separator="\n")
                 else:
                     text = ""
 
@@ -270,7 +394,12 @@ def extract_body(msg_path: str, do_ocr: bool = True) -> str:
                         text = (text.rstrip() + "\n\n" + "\n\n".join(remaining))
 
                 text = text.replace("\r\n", "\n").replace("\r", "\n")
-                return strip_signatures(strip_reply_headers(text))
+                # 空白だけの行（NBSP含む）を空行に正規化
+                text = re.sub(r'^[ \t\u00A0]+$', '', text, flags=re.MULTILINE)
+                text = strip_signatures(strip_reply_headers(text))
+                # 最終正規化：連続空行は最大1行 (= "\n\n") に
+                text = re.sub(r'\n{3,}', '\n\n', text)
+                return text.strip()
             finally:
                 msg.close()
         except (UnicodeDecodeError, UnicodeEncodeError):
