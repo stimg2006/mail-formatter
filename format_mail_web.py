@@ -49,6 +49,14 @@ _FROM_LINE_RE = re.compile(
     r'^[ \t]*(?:From|差出人)\s*:',
     re.MULTILINE | re.IGNORECASE,
 )
+
+# HTML メール由来でラベル行と値行が改行で分離されているケースを 1 行に折り畳む。
+# 例)  "From:\nSyed Yusuff Basha ..."  →  "From: Syed Yusuff Basha ..."
+_FOLD_HEADER_RE = re.compile(
+    r'^([ \t]*(?:From|Sent|Date|To|Cc|Bcc|Subject|'
+    r'差出人|送信日時|送信日|宛先|件名|CC|BCC)[ \t]*:)[ \t]*\n+(?=[ \t]*\S)',
+    re.MULTILINE | re.IGNORECASE,
+)
 _SIG_INDICATOR_RE = re.compile(
     r'\S+@\S+<mailto:'                          # HTML形式 email<mailto:...>
     r'|\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b'         # 素のメールアドレス
@@ -71,6 +79,8 @@ def _is_short_block(text: str) -> bool:
 def strip_reply_headers(text: str) -> str:
     # 既存のダッシュ等の区切り線を一旦削除
     text = _SEPARATOR_RE.sub('', text)
+    # HTML由来でラベルと値が改行分離されている場合、1行に折り畳んでから削除判定にかける
+    text = _FOLD_HEADER_RE.sub(r'\1 ', text)
     # 不要なヘッダー行を削除（From / Sent / Date / 差出人 / 送信日時 は残す）
     text = _REMOVE_HEADER_RE.sub('', text)
     # 単独 "Internal" 行をメール境界の区切り線に変換
