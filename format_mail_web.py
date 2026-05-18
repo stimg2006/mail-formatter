@@ -634,6 +634,17 @@ with tab2:
                 update();
             }
 
+            function setupAutoClearOnEmpty(left, right) {
+                // 入力欄が空になったら整形結果欄も即時クリアする（Streamlit の rerun を待たない）
+                if (left.dataset.autoClearLinked === "1") return;
+                left.dataset.autoClearLinked = "1";
+                left.addEventListener("input", function () {
+                    if (left.value.length === 0 && right.value.length > 0) {
+                        clearTextarea(right);
+                    }
+                });
+            }
+
             function setupScrollSync(left, right) {
                 if (left.dataset.scrollSync === "1" && right.dataset.scrollSync === "1") {
                     return;
@@ -675,6 +686,7 @@ with tab2:
                 ensureClearButton(left);
                 ensureClearButton(right);
                 setupScrollSync(left, right);
+                setupAutoClearOnEmpty(left, right);
                 return true;
             }
 
