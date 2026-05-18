@@ -499,10 +499,11 @@ with tab2:
             key="raw_input",
         )
 
-    # 入力欄の値が変わるたびに自動で整形して右側 widget の初期値にする。
-    # widget レンダリング前に session_state に書き込むことで、次の描画で反映される。
+    # 入力欄の値が変わるたびに自動で整形する。
+    # 整形後 widget は key を使わず value 引数で毎回描画する（key 経由 session_state では
+    # 既存 widget に新値が反映されない Streamlit バージョンがあるため）。
     current_raw = st.session_state.get("raw_input", "") or ""
-    st.session_state["paste_result"] = (
+    formatted_text = (
         strip_signatures(strip_reply_headers(current_raw))
         if current_raw.strip()
         else ""
@@ -520,9 +521,9 @@ with tab2:
         st.subheader("整形後")
         st.text_area(
             "整形結果",
+            value=formatted_text,
             height=520,
             label_visibility="collapsed",
-            key="paste_result",
         )
 
     # ── 入力と整形後のテキストエリアに対する UI 拡張 ──────────────────────────
