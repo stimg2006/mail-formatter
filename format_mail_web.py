@@ -482,7 +482,10 @@ with tab1:
 
 # ── タブ2: テキスト貼り付け ───────────────────────────────────────────────────
 with tab2:
-    st.markdown("任意のメール本文を貼り付けると、返信ヘッダーと署名を除去して返します。")
+    st.markdown(
+        "任意のメール本文を貼り付けると、返信ヘッダーと署名を除去して返します。"
+        "（入力後にフォーカスを外す/Tabキー/Ctrl+Enter で自動整形されます）"
+    )
 
     col1, col_mid, col2 = st.columns([20, 1, 20])
 
@@ -496,16 +499,22 @@ with tab2:
             key="raw_input",
         )
 
+    # 入力欄の値が変わるたびに自動で整形して右側 widget の初期値にする。
+    # widget レンダリング前に session_state に書き込むことで、次の描画で反映される。
+    current_raw = st.session_state.get("raw_input", "") or ""
+    st.session_state["paste_result"] = (
+        strip_signatures(strip_reply_headers(current_raw))
+        if current_raw.strip()
+        else ""
+    )
+
     with col_mid:
-        # テキストエリアのラベル分（subheader + margin）を合わせて縦中央に寄せる
-        st.markdown("<div style='margin-top:3.6rem'></div>", unsafe_allow_html=True)
-        if st.button("→", key="btn_paste", type="primary", use_container_width=True):
-            current_raw = st.session_state.get("raw_input", "")
-            if current_raw.strip():
-                # 整形後 textarea の key と同じ名前で書き込めば、次の描画でそのまま反映される
-                st.session_state["paste_result"] = strip_signatures(
-                    strip_reply_headers(current_raw)
-                )
+        # 矢印は装飾用（自動整形なのでボタンではない）
+        st.markdown(
+            "<div style='margin-top:4.2rem; text-align:center; "
+            "font-size:1.8rem; color:#888;'>→</div>",
+            unsafe_allow_html=True,
+        )
 
     with col2:
         st.subheader("整形後")
@@ -597,6 +606,14 @@ with tab2:
                     e.preventDefault();
                     e.stopPropagation();
                     clearTextarea(ta);
+                    // 整形結果欄の × は、入力欄も連動してクリアする
+                    // （自動整形なので入力欄が残っているとすぐに再表示されてしまうため）
+                    if (ta.getAttribute("aria-label") === RIGHT_LABEL) {
+                        const left = parentDoc.querySelector(
+                            'textarea[aria-label="' + LEFT_LABEL + '"]'
+                        );
+                        if (left) clearTextarea(left);
+                    }
                     btn.style.display = "none";
                 });
                 wrapper.appendChild(btn);
