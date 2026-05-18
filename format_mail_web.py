@@ -551,12 +551,16 @@ with tab2:
             }
 
             function ensureClearButton(ta) {
-                // textarea のすぐ外側のラッパー (data-baseweb="textarea") を基準に絶対配置
+                // textarea のすぐ外側のラッパーを複数のセレクタで頑張って探す
+                // (Streamlit のバージョンで data-baseweb / data-testid / クラス名が変わるため)
                 const wrapper =
-                    ta.closest('[data-baseweb="textarea"]') || ta.parentElement;
+                    ta.closest('[data-baseweb="textarea"]') ||
+                    ta.closest('[data-baseweb="base-input"]') ||
+                    ta.closest('[data-testid="stTextArea"]') ||
+                    ta.closest('.stTextArea') ||
+                    ta.parentElement;
                 if (!wrapper) return;
                 if (wrapper.dataset.clearBtnInstalled === "1") {
-                    // 既に設置済みでも表示状態だけは現在値に合わせる
                     const existing = wrapper.querySelector(".__clear_btn__");
                     if (existing) existing.style.display = ta.value.length ? "flex" : "none";
                     return;
@@ -574,23 +578,25 @@ with tab2:
                 btn.setAttribute("title", "クリア");
                 btn.style.cssText = [
                     "position:absolute",
-                    "top:6px",
-                    "right:8px",
-                    "z-index:50",
-                    "width:22px",
-                    "height:22px",
+                    "top:8px",
+                    "right:10px",
+                    "z-index:1000",
+                    "width:24px",
+                    "height:24px",
                     "padding:0",
                     "border:none",
                     "border-radius:50%",
-                    "background:rgba(0,0,0,0.10)",
+                    "background:rgba(0,0,0,0.12)",
                     "color:#333",
-                    "font-size:15px",
+                    "font-size:16px",
+                    "font-weight:bold",
                     "line-height:1",
                     "cursor:pointer",
                     "display:none",
                     "align-items:center",
                     "justify-content:center",
                     "font-family:Arial, sans-serif",
+                    "box-shadow:0 1px 2px rgba(0,0,0,0.15)",
                 ].join(";");
                 btn.addEventListener("mouseenter", function () {
                     btn.style.background = "rgba(0,0,0,0.20)";
@@ -686,5 +692,7 @@ with tab2:
         })();
         </script>
         """,
-        height=0,
+        # height=0 だと iframe が完全に隠され、内部 JS が実行されない Streamlit バージョンが
+        # あるため、最小限のサイズを確保する
+        height=1,
     )
