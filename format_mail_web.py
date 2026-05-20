@@ -45,6 +45,12 @@ _REMOVE_HEADER_RE = re.compile(
     re.MULTILINE | re.IGNORECASE,
 )
 
+# 単独 "Internal" 行（Outlook の社内メール境界ラベル）を削除
+_INTERNAL_LINE_RE = re.compile(
+    r'^[ \t\u00A0]*Internal[ \t\u00A0]*\r?\n?',
+    re.MULTILINE | re.IGNORECASE,
+)
+
 # 差出人ヘッダー行（前に区切り線を挿入する目印）
 _FROM_LINE_RE = re.compile(
     r'^[ \t]*(?:From|差出人)\s*:',
@@ -101,6 +107,8 @@ def strip_reply_headers(text: str) -> str:
     text = _FOLD_HEADER_RE.sub(r'\1 ', text)
     # 不要なヘッダー行を削除（From / Sent / Date / 差出人 / 送信日時 は残す）
     text = _REMOVE_HEADER_RE.sub('', text)
+    # 単独 "Internal" 行を削除
+    text = _INTERNAL_LINE_RE.sub('', text)
     # From: / 差出人: 行の前に区切り線を挿入（残るのは From: / Sent: 等のみ）
     text = _FROM_LINE_RE.sub(SEPARATOR_LINE + '\n' + r'\g<0>', text)
     # 空白のみの行を空行に、連続する空行を1行に
