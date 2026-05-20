@@ -35,7 +35,7 @@ _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp"
 
 _SEPARATOR_RE = re.compile(r'^[ \t]*[-_=*]{5,}[^\n]*$\r?\n?', re.MULTILINE)
 
-# メール境界を示す区切り線（Internal 置換と共用）
+# メール境界を示す区切り線（From: 行の前に挿入）
 SEPARATOR_LINE = '=' * 52
 
 # 削除するヘッダー行: From / Sent / Date / 差出人 / 送信日時 / 送信日 は残す
@@ -101,19 +101,12 @@ def strip_reply_headers(text: str) -> str:
     text = _FOLD_HEADER_RE.sub(r'\1 ', text)
     # 不要なヘッダー行を削除（From / Sent / Date / 差出人 / 送信日時 は残す）
     text = _REMOVE_HEADER_RE.sub('', text)
-    # 単独 "Internal" 行をメール境界の区切り線に変換
-    text = re.sub(
-        r'^[ \t]*Internal[ \t]*$',
-        SEPARATOR_LINE,
-        text,
-        flags=re.MULTILINE | re.IGNORECASE,
-    )
     # From: / 差出人: 行の前に区切り線を挿入（残るのは From: / Sent: 等のみ）
     text = _FROM_LINE_RE.sub(SEPARATOR_LINE + '\n' + r'\g<0>', text)
     # 空白のみの行を空行に、連続する空行を1行に
     text = re.sub(r'^[ \t]+$', '', text, flags=re.MULTILINE)
     text = re.sub(r'\n{3,}', '\n\n', text)
-    # 連続する区切り線（直前の Internal 等と重なるケース）を 1 本にまとめる
+    # 連続する区切り線を 1 本にまとめる
     sep_pat = re.escape(SEPARATOR_LINE)
     text = re.sub(rf'({sep_pat})(?:\s*\n+\s*{sep_pat})+', r'\1', text)
     # 冒頭の区切り線（前にメールが存在しないので不要）を除去
